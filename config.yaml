@@ -1,0 +1,15 @@
+stt_model: small
+llm_model: qwen3:8b
+vision_model: moondream
+memory_limit: 200
+confirmation_required: true
+ollama_host: http://localhost:11434
+log_level: INFO
+stt_silence_threshold: 500
+mic_device: auto
+terminal_timeout: 30
+memory_db_path: data/memory.db
+browser_headless: false
+browser_executable: ""
+wakeword_threshold: 0.3
+wakeword_models_dir: config/wakeword_models

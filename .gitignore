@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Tests
+.pytest_cache/
+
+# Runtime artifacts
+logs/
+database/
+data/
+screens/
+
+# Local tooling / editor
+.claude/
