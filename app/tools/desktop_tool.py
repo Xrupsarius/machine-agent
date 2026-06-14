@@ -15,6 +15,18 @@ _TERMINAL_EMULATORS = [
     "xfce4-terminal", "alacritty", "kitty",
 ]
 
+# evdev keycodes: ENTER=28, BACKSPACE=14, LEFTCTRL=29, LEFTSHIFT=42
+_KEY_CODES: dict[str, list[str]] = {
+    "enter": ["28:1", "28:0"],
+    "newline": ["42:1", "28:1", "28:0", "42:0"],
+    "delete_word": ["29:1", "14:1", "14:0", "29:0"],
+}
+_KEY_WTYPE: dict[str, list[str]] = {
+    "enter": ["-k", "Return"],
+    "newline": ["-M", "shift", "-k", "Return", "-m", "shift"],
+    "delete_word": ["-M", "ctrl", "-k", "BackSpace", "-m", "ctrl"],
+}
+
 _APP_ALIASES: dict[str, tuple[str, ...]] = {
     "браузер": ("chromium", "google-chrome", "chrome", "firefox"),
     "browser": ("chromium", "google-chrome", "chrome", "firefox"),
@@ -80,6 +92,10 @@ class DesktopTool(BaseTool):
     ADR-007: every execution logged via BaseTool.execute().
     """
 
+    def __init__(self, app_catalog=None) -> None:
+        super().__init__()
+        self._app_catalog = app_catalog
+
     @property
     def name(self) -> str:
         return "desktop"
@@ -108,6 +124,8 @@ class DesktopTool(BaseTool):
                 return self._open_terminal()
             case "type_text":
                 return self._type_text(parameters.get("text", ""))
+            case "press_key":
+                return self._press_key(parameters.get("key", "enter"))
             case "close_active_window":
                 return self._close_active_window()
             case _:
@@ -116,7 +134,7 @@ class DesktopTool(BaseTool):
                     error=(
                         f"Unknown action '{action}'. Supported: "
                         "open_app, close_app, list_windows, switch_window, "
-                        "open_terminal, type_text, close_active_window"
+                        "open_terminal, type_text, press_key, close_active_window"
                     ),
                 )
 
@@ -126,17 +144,24 @@ class DesktopTool(BaseTool):
         if not name.strip():
             return ToolResult(success=False, error="No app name provided")
         args = args if isinstance(args, list) else []
-        candidates = _resolve_app(name)
-        desktop_binary = _find_desktop_app(name)
-        if desktop_binary and desktop_binary not in candidates:
-            candidates.append(desktop_binary)
-        for candidate in candidates:
+        attempts: list[list[str]] = []
+        if self._app_catalog is not None:
+            catalog_argv = self._app_catalog.resolve(name)
+            if catalog_argv:
+                attempts.append(catalog_argv)
+        for candidate in _resolve_app(name):
+            attempts.append([candidate])
+        if self._app_catalog is None:
+            desktop_binary = _find_desktop_app(name)
+            if desktop_binary:
+                attempts.append([desktop_binary])
+        for argv in attempts:
             try:
                 subprocess.Popen(
-                    [candidate] + args,
+                    argv + args,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-                return ToolResult(success=True, output=f"Launched: {candidate}")
+                return ToolResult(success=True, output=f"Launched: {argv[0]}")
             except FileNotFoundError:
                 continue
             except Exception as e:
@@ -349,6 +374,25 @@ class DesktopTool(BaseTool):
         except Exception:
             return False
         return any(term in cls for term in _TERMINAL_EMULATORS) or "foot" in cls or "wezterm" in cls
+
+    def _press_key(self, key: str) -> ToolResult:
+        key = (key or "enter").lower()
+        if key not in _KEY_CODES:
+            return ToolResult(success=False, error=f"Unknown key '{key}'. Supported: {', '.join(_KEY_CODES)}")
+        if _has("ydotool"):
+            proc = subprocess.run(["ydotool", "key", *_KEY_CODES[key]], capture_output=True, text=True)
+            if proc.returncode == 0:
+                return ToolResult(success=True, output=f"Pressed {key}")
+            log.warning(f"ydotool key '{key}' failed ({proc.stderr.strip()!r}) — falling back to wtype")
+        if _has("wtype"):
+            proc = subprocess.run(["wtype", *_KEY_WTYPE[key]], capture_output=True, text=True)
+            if proc.returncode == 0:
+                return ToolResult(success=True, output=f"Pressed {key}")
+            return ToolResult(success=False, error=proc.stderr.strip() or "wtype failed")
+        return ToolResult(
+            success=False,
+            error="press_key requires ydotool or wtype. Install: sudo pacman -S ydotool",
+        )
 
     def _open_terminal(self) -> ToolResult:
         for emulator in _TERMINAL_EMULATORS:

@@ -36,6 +36,7 @@ from app.tools.tool_executor import ToolExecutor, EVENT_EXECUTION_COMPLETED
 from app.tools.terminal_tool import TerminalTool
 from app.tools.filesystem_tool import FilesystemTool
 from app.tools.desktop_tool import DesktopTool
+from app.tools.app_catalog import AppCatalog
 from app.tools.accessibility_tool import AccessibilityTool
 from app.tools.browser_tool import BrowserTool
 from app.tools.vision_tool import VisionTool
@@ -115,10 +116,18 @@ def main() -> None:
     registry.register("wakeword", wakeword)
     registry.register("pipeline", pipeline)
 
+    app_catalog = AppCatalog(cache_path=config.get("app_catalog_path", "data/app_catalog.json"))
+    threading.Thread(target=app_catalog.load_or_scan, daemon=True, name="AppCatalogScan").start()
+    registry.register("app_catalog", app_catalog)
+    desktop_tool = DesktopTool(app_catalog=app_catalog)
+    _command_queue: queue.Queue = queue.Queue()
     dictation = DictationController(
         mic, whisper, state_manager, event_bus,
         pause_listening=pipeline.stop,
         resume_listening=pipeline.start,
+        inject_text=lambda t: desktop_tool.execute("type_text", {"text": t}),
+        run_key=lambda k: desktop_tool.execute("press_key", {"key": k}),
+        run_command=lambda t: _command_queue.put(t),
         silence_threshold=config.get("stt_silence_threshold", 500),
         chunk_seconds=config.get("dictation_chunk_seconds", 0.7),
         silence_seconds=config.get("dictation_silence_seconds", 1.0),
@@ -154,7 +163,7 @@ def main() -> None:
     tool_registry = ToolRegistry()
     tool_registry.register(TerminalTool(timeout=config.get("terminal_timeout", 30)))
     tool_registry.register(FilesystemTool())
-    tool_registry.register(DesktopTool())
+    tool_registry.register(desktop_tool)
     tool_registry.register(AccessibilityTool())
     tool_registry.register(BrowserTool(
         headless=config.get("browser_headless", False),
@@ -225,8 +234,6 @@ def main() -> None:
 
     def _on_stt_empty(_) -> None:
         _log(event_bus, "Не расслышал команду — скажите wake word и повторите", "warning")
-
-    _command_queue: queue.Queue = queue.Queue()
 
     def _command_worker() -> None:
         while True:

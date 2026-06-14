@@ -7,6 +7,7 @@ from app.core.event_bus import EventBus
 from app.stt.dictation_controller import (
     EVENT_DICTATION_PARTIAL, EVENT_DICTATION_COMMITTED,
     EVENT_DICTATION_STARTED, EVENT_DICTATION_STOPPED,
+    EVENT_DICTATION_COMMAND,
 )
 
 EVENT_DICTATION_TOGGLE = "dictation.toggle"
@@ -16,6 +17,7 @@ class DictationWidget(QWidget):
     _sig_partial = Signal(str, str)
     _sig_committed = Signal(str)
     _sig_running = Signal(bool)
+    _sig_command = Signal(str)
 
     def __init__(self, event_bus: EventBus, parent=None) -> None:
         super().__init__(parent)
@@ -33,12 +35,12 @@ class DictationWidget(QWidget):
 
         bar = QHBoxLayout()
         bar.setContentsMargins(16, 6, 16, 6)
-        header = QLabel("Диктовка")
-        header.setStyleSheet("font-weight: bold;")
+        self._header = QLabel("Диктовка")
+        self._header.setStyleSheet("font-weight: bold;")
         self._button = QPushButton("Старт")
         self._button.setCheckable(True)
         self._button.clicked.connect(self._on_button)
-        bar.addWidget(header)
+        bar.addWidget(self._header)
         bar.addStretch()
         bar.addWidget(self._button)
 
@@ -53,8 +55,10 @@ class DictationWidget(QWidget):
         self._sig_partial.connect(self._apply_partial)
         self._sig_committed.connect(self._apply_committed)
         self._sig_running.connect(self._apply_running)
+        self._sig_command.connect(self._apply_command)
         self._event_bus.subscribe(EVENT_DICTATION_PARTIAL, self._on_partial)
         self._event_bus.subscribe(EVENT_DICTATION_COMMITTED, self._on_committed)
+        self._event_bus.subscribe(EVENT_DICTATION_COMMAND, self._on_command)
         self._event_bus.subscribe(EVENT_DICTATION_STARTED, lambda _: self._sig_running.emit(True))
         self._event_bus.subscribe(EVENT_DICTATION_STOPPED, lambda _: self._sig_running.emit(False))
 
@@ -66,6 +70,9 @@ class DictationWidget(QWidget):
 
     def _on_committed(self, data: dict) -> None:
         self._sig_committed.emit(data.get("text", ""))
+
+    def _on_command(self, data: dict) -> None:
+        self._sig_command.emit(data.get("command", ""))
 
     def _apply_partial(self, committed: str, interim: str) -> None:
         self._committed = committed
@@ -79,9 +86,20 @@ class DictationWidget(QWidget):
         self._interim = ""
         self._render()
 
+    def _apply_command(self, command: str) -> None:
+        if command == "submit":
+            self._finalized = (self._finalized + " ⏎").strip()
+            self._committed = ""
+            self._interim = ""
+            self._render()
+
     def _apply_running(self, running: bool) -> None:
         self._button.setText("Стоп" if running else "Старт")
         self._button.setChecked(running)
+        self._header.setText("🎙 Слушаю…" if running else "Диктовка")
+        self._header.setStyleSheet(
+            "font-weight: bold; color: #0EA5E9;" if running else "font-weight: bold;"
+        )
 
     def _render(self) -> None:
         parts = []

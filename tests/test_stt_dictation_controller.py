@@ -7,7 +7,9 @@ from app.stt.dictation_controller import (
     DictationController,
     EVENT_DICTATION_STARTED,
     EVENT_DICTATION_STOPPED,
+    EVENT_DICTATION_COMMAND,
     _rms,
+    _split_directive,
     _to_float32,
 )
 
@@ -161,3 +163,83 @@ def test_calibration_keeps_floor_for_quiet_mic():
     ctrl.stop()
 
     assert threshold == 500
+
+
+def test_split_directive_plain_text_has_no_command():
+    body, local, agent = _split_directive("привет мир как дела")
+    assert (local, agent) == (None, None)
+    assert body == "привет мир как дела"
+
+
+def test_split_directive_marker_extracts_submit():
+    body, local, agent = _split_directive("привет мир омнис отправь")
+    assert local == "submit" and agent is None
+    assert body == "привет мир"
+
+
+def test_split_directive_marker_only():
+    body, local, agent = _split_directive("Омнис, отправь.")
+    assert local == "submit" and agent is None
+    assert body == ""
+
+
+def test_split_directive_newline_and_delete():
+    assert _split_directive("омнис новая строка")[1] == "newline"
+    assert _split_directive("омнис сотри последнее")[1] == "delete_word"
+    assert _split_directive("омнис стоп")[1] == "stop"
+
+
+def test_split_directive_routes_unknown_to_agent():
+    body, local, agent = _split_directive("заметка омнис открой браузер")
+    assert local is None
+    assert agent == "открой браузер"
+    assert body == "заметка"
+
+
+def test_split_directive_no_marker_keeps_word():
+    body, local, agent = _split_directive("отправь письмо другу")
+    assert (local, agent) == (None, None)
+    assert body == "отправь письмо другу"
+
+
+def test_commit_final_injects_body():
+    typed = []
+    ctrl, _, _, _, _, _ = _make_controller(inject_text=typed.append)
+    ctrl._commit_final("привет мир")
+    assert typed == ["привет мир"]
+
+
+def test_commit_final_runs_submit_and_emits_command():
+    typed = []
+    keys = []
+    commands = []
+    ctrl, bus, _, _, _, _ = _make_controller(
+        inject_text=typed.append, run_key=keys.append,
+    )
+    bus.subscribe(EVENT_DICTATION_COMMAND, lambda p: commands.append(p["command"]))
+    ctrl._commit_final("сохрани заметку омнис отправь")
+    assert typed == ["сохрани заметку"]
+    assert keys == ["enter"]
+    assert commands == ["submit"]
+
+
+def test_commit_final_command_only_does_not_inject():
+    typed = []
+    keys = []
+    ctrl, _, _, _, _, _ = _make_controller(
+        inject_text=typed.append, run_key=keys.append,
+    )
+    ctrl._commit_final("омнис отправь")
+    assert typed == []
+    assert keys == ["enter"]
+
+
+def test_commit_final_routes_agent_command():
+    typed = []
+    sent = []
+    ctrl, _, _, _, _, _ = _make_controller(
+        inject_text=typed.append, run_command=sent.append,
+    )
+    ctrl._commit_final("заметка омнис открой браузер")
+    assert typed == ["заметка"]
+    assert sent == ["открой браузер"]

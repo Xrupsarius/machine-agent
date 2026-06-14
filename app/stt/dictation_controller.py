@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 import time
 from typing import Callable
@@ -17,6 +18,40 @@ EVENT_DICTATION_PARTIAL = "dictation.partial"
 EVENT_DICTATION_COMMITTED = "dictation.committed"
 EVENT_DICTATION_STARTED = "dictation.started"
 EVENT_DICTATION_STOPPED = "dictation.stopped"
+EVENT_DICTATION_COMMAND = "dictation.command"
+
+_MARKER_RE = re.compile(
+    r"\b(?:омн[иеё]с|омн[еэ]с|омнус|amnis|omnis|онис)\b[\s,]*",
+    re.IGNORECASE,
+)
+
+_LOCAL_COMMANDS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(?:отправ\w*|энтер|enter)[\s.!,;:]*$", re.IGNORECASE), "submit"),
+    (re.compile(r"^(?:нов(?:ая|ую) строк\w*|с новой строки|перенос\w*)[\s.!,;:]*$", re.IGNORECASE), "newline"),
+    (re.compile(r"^(?:сотри|стереть|удали)(?: послед\w+| это| последнее слово)?[\s.!,;:]*$", re.IGNORECASE), "delete_word"),
+    (re.compile(r"^(?:стоп|хватит|закончи\w*|останови\w*)[\s.!,;:]*$", re.IGNORECASE), "stop"),
+]
+
+
+def _split_directive(text: str) -> tuple[str, str | None, str | None]:
+    """Split a finalized segment into (text_to_type, local_command, agent_command).
+
+    A directive is only recognized when prefixed by the marker word (омнис),
+    so it can't be confused with ordinary dictated text. Text after the marker
+    is matched against local editing commands first; anything else is returned
+    as a free-form agent command for the full intent/plan pipeline.
+    """
+    match = _MARKER_RE.search(text)
+    if not match:
+        return text, None, None
+    body = text[: match.start()].strip()
+    rest = text[match.end():].strip()
+    for pattern, name in _LOCAL_COMMANDS:
+        if pattern.match(rest):
+            return body, name, None
+    if rest:
+        return body, None, rest
+    return body, None, None
 
 
 def _rms(audio_bytes: bytes) -> float:
@@ -48,6 +83,9 @@ class DictationController:
         event_bus: EventBus,
         pause_listening: Callable[[], None],
         resume_listening: Callable[[], None],
+        inject_text: Callable[[str], None] | None = None,
+        run_key: Callable[[str], None] | None = None,
+        run_command: Callable[[str], None] | None = None,
         silence_threshold: float = 500.0,
         chunk_seconds: float = 0.7,
         silence_seconds: float = 1.0,
@@ -61,6 +99,9 @@ class DictationController:
         self._event_bus = event_bus
         self._pause_listening = pause_listening
         self._resume_listening = resume_listening
+        self._inject_text = inject_text
+        self._run_key = run_key
+        self._run_command = run_command
         self._configured_threshold = silence_threshold
         self._silence_threshold = silence_threshold
         self._chunk_seconds = chunk_seconds
@@ -128,8 +169,7 @@ class DictationController:
             self._segment = bytearray()
         if len(tail) >= self._min_bytes:
             final = self._transcriber.finalize(_to_float32(tail))
-            if final:
-                self._event_bus.publish(EVENT_DICTATION_COMMITTED, {"text": final})
+            self._commit_final(final)
         self._active = False
         self._mic.close()
         self._event_bus.publish(EVENT_DICTATION_STOPPED, {})
@@ -219,5 +259,41 @@ class DictationController:
             self._segment = bytearray()
             self._silence_streak = 0
             self._has_speech = False
-        if final:
-            self._event_bus.publish(EVENT_DICTATION_COMMITTED, {"text": final})
+        self._commit_final(final)
+
+    def _commit_final(self, final: str) -> None:
+        if not final:
+            return
+        body, local_command, agent_command = _split_directive(final)
+        if body:
+            self._event_bus.publish(EVENT_DICTATION_COMMITTED, {"text": body})
+            if self._inject_text is not None:
+                try:
+                    self._inject_text(body)
+                except Exception as e:
+                    log.error(f"Dictation inject error: {e}")
+        if local_command:
+            self._run_local(local_command)
+            self._event_bus.publish(EVENT_DICTATION_COMMAND, {"command": local_command})
+        elif agent_command:
+            if self._run_command is not None:
+                try:
+                    self._run_command(agent_command)
+                except Exception as e:
+                    log.error(f"Dictation command error: {e}")
+            self._event_bus.publish(
+                EVENT_DICTATION_COMMAND, {"command": "agent", "text": agent_command}
+            )
+
+    _KEY_FOR_COMMAND = {"submit": "enter", "newline": "newline", "delete_word": "delete_word"}
+
+    def _run_local(self, name: str) -> None:
+        if name == "stop":
+            threading.Thread(target=self.stop, daemon=True, name="DictationStop").start()
+            return
+        key = self._KEY_FOR_COMMAND.get(name)
+        if key and self._run_key is not None:
+            try:
+                self._run_key(key)
+            except Exception as e:
+                log.error(f"Dictation key '{key}' error: {e}")

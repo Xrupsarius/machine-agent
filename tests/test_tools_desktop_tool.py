@@ -55,6 +55,29 @@ def test_open_app_not_found_no_xdg_open_fails(tool):
             assert "not found" in result.error
 
 
+def test_open_app_uses_catalog_argv():
+    catalog = MagicMock()
+    catalog.resolve.return_value = ["flatpak", "run", "com.x.App"]
+    tool = DesktopTool(app_catalog=catalog)
+    with patch("app.tools.desktop_tool.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = MagicMock()
+        result = tool.execute("open_app", {"name": "иксрей"})
+        assert result.success
+        catalog.resolve.assert_called_once_with("иксрей")
+        assert mock_popen.call_args[0][0] == ["flatpak", "run", "com.x.App"]
+
+
+def test_open_app_catalog_miss_falls_back_to_alias():
+    catalog = MagicMock()
+    catalog.resolve.return_value = None
+    tool = DesktopTool(app_catalog=catalog)
+    with patch("app.tools.desktop_tool.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = MagicMock()
+        result = tool.execute("open_app", {"name": "браузер"})
+        assert result.success
+        assert mock_popen.call_args[0][0][0] in ("chromium", "google-chrome", "chrome", "firefox")
+
+
 def test_open_app_passes_args(tool):
     with patch("app.tools.desktop_tool.subprocess.Popen") as mock_popen:
         mock_popen.return_value = MagicMock()
@@ -315,3 +338,46 @@ def test_type_text_no_tools_fails(tool):
         result = tool.execute("type_text", {"text": "hi"})
         assert not result.success
         assert "ydotool" in result.error
+
+
+def test_press_key_enter_uses_ydotool(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n == "ydotool"):
+        with patch("app.tools.desktop_tool.subprocess.run", return_value=_run_ok()) as run:
+            result = tool.execute("press_key", {"key": "enter"})
+            assert result.success
+            cmd = run.call_args[0][0]
+            assert cmd[0] == "ydotool" and "28:1" in cmd and "28:0" in cmd
+
+
+def test_press_key_newline_sends_shift_enter(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n == "ydotool"):
+        with patch("app.tools.desktop_tool.subprocess.run", return_value=_run_ok()) as run:
+            result = tool.execute("press_key", {"key": "newline"})
+            assert result.success
+            cmd = run.call_args[0][0]
+            assert "42:1" in cmd and "28:1" in cmd
+
+
+def test_press_key_delete_word_sends_ctrl_backspace(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n == "ydotool"):
+        with patch("app.tools.desktop_tool.subprocess.run", return_value=_run_ok()) as run:
+            result = tool.execute("press_key", {"key": "delete_word"})
+            assert result.success
+            cmd = run.call_args[0][0]
+            assert "29:1" in cmd and "14:1" in cmd
+
+
+def test_press_key_unknown_fails(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n == "ydotool"):
+        result = tool.execute("press_key", {"key": "bogus"})
+        assert not result.success
+        assert "Unknown key" in result.error
+
+
+def test_press_key_falls_back_to_wtype(tool):
+    fail = MagicMock(returncode=1, stderr="no socket")
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n in ("ydotool", "wtype")):
+        with patch("app.tools.desktop_tool.subprocess.run", side_effect=[fail, _run_ok()]) as run:
+            result = tool.execute("press_key", {"key": "enter"})
+            assert result.success
+            assert run.call_args_list[-1][0][0][:2] == ["wtype", "-k"]

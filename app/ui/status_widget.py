@@ -20,7 +20,7 @@ STATUS_LABELS = {
     AppState.PLANNING:              "Планирую...",
     AppState.EXECUTING:             "Выполняю...",
     AppState.WAITING_CONFIRMATION:  "Требуется подтверждение",
-    AppState.DICTATING:             "Диктовка...",
+    AppState.DICTATING:             "🎙 Слушаю…",
     AppState.ERROR:                 "Ошибка",
 }
 
