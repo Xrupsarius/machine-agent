@@ -226,6 +226,17 @@ def main() -> None:
 
     _chat_history: list[dict] = []
 
+    # Intents whose output is information the user reads (mirrored to the chat
+    # panel); action intents (open/close/type…) stay in the activity log only.
+    _INFORMATIONAL_INTENTS = {
+        "run_command", "read_file", "list_dir", "search_files",
+        "describe_screen", "find_screen_element",
+    }
+
+    def _chat(role: str, text: str) -> None:
+        if text:
+            event_bus.publish(EVENT_CHAT_MESSAGE, {"role": role, "text": text})
+
     def _chat_reply(user_text: str) -> None:
         try:
             event_bus.publish(EVENT_CHAT_MESSAGE, {"role": "user", "text": user_text})
@@ -290,6 +301,8 @@ def main() -> None:
             if memory_search.is_history_query(text):
                 answer = memory_search.answer(text)
                 _log(event_bus, answer)
+                _chat("user", text)
+                _chat("assistant", answer)
                 return
 
             # Vision queries: capture screen and analyze — no LLM needed. ADR-005.
@@ -299,6 +312,8 @@ def main() -> None:
                 result = vision_tool.execute("describe_screen", {})
                 if result.success:
                     _log(event_bus, f"Экран: {result.output}")
+                    _chat("user", text)
+                    _chat("assistant", result.output)
                 else:
                     _log(event_bus, f"Ошибка анализа экрана: {result.error}", "error")
                 return
@@ -310,6 +325,8 @@ def main() -> None:
                 result = vision_tool.execute("find_element", {"element": element})
                 if result.success:
                     _log(event_bus, f"Найдено: {result.output}")
+                    _chat("user", text)
+                    _chat("assistant", result.output)
                 else:
                     _log(event_bus, f"Ошибка поиска элемента: {result.error}", "error")
                 return
@@ -391,9 +408,13 @@ def main() -> None:
             results = data.get("results", [])
             level = "success" if ok else "error"
             _log(event_bus, f"Выполнение '{intent}': {'OK' if ok else 'ОШИБКА'} ({len(results)} шаг(ов))", level)
-            for r in results:
-                if r.get("output"):
-                    _log(event_bus, f"  → {r['output'][:200]}")
+            outputs = [r["output"] for r in results if r.get("output")]
+            for output in outputs:
+                _log(event_bus, f"  → {output[:200]}")
+
+            if ok and intent in _INFORMATIONAL_INTENTS and outputs:
+                _chat("user", _ctx.get("user_text", ""))
+                _chat("assistant", "\n".join(outputs)[:3000])
 
             # ADR-008: Memory is the final step in the chain
             memory_service.save(
