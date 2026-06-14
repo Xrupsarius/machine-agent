@@ -8,7 +8,7 @@ def test_assistant_message_shown(qapp):
     bus.publish(EVENT_CHAT_MESSAGE, {"role": "assistant", "text": "Привет, чем помочь?"})
     text = w.display_text
     assert "Привет, чем помочь?" in text
-    assert "Собеседник" in text
+    assert "Omnis" in text
 
 
 def test_user_message_shown(qapp):
