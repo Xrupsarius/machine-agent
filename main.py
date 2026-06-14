@@ -303,6 +303,12 @@ def main() -> None:
             _ctx["user_text"] = text
             _ctx["plan"] = {}
 
+            # Voice-activated dictation: "начни диктовку" switches into the mode.
+            if not dictation.is_active and command_set.is_dictation_start(text):
+                _log(event_bus, "Включаю диктовку…")
+                event_bus.publish(EVENT_DICTATION_TOGGLE, {})
+                return
+
             # "What apps do I have?" — answered from the catalog, no LLM needed.
             if is_app_list_query(text):
                 names = app_catalog.app_names()

@@ -7,9 +7,12 @@ ru:
   newline: [новая строка, с новой строки, перенос, новую строку]
   delete_word: [сотри, сатри, удали, стереть, удалить]
   stop: [стоп, хватит, закончи, останови, заверши]
+  # Wake-word phrases that switch into dictation mode (matched by substring).
+  dictation: [начни диктов, включи диктов, режим диктов, диктовку, диктовка, диктуй, надиктую]
 en:
   marker: [omnis, omni, omnes, omniss]
   submit: [send, submit, enter, post]
   newline: [new line, newline, line break, next line]
   delete_word: [delete, erase, backspace, remove]
   stop: [stop, halt, finish, end]
+  dictation: [start dictation, dictation mode, begin dictation, dictate]

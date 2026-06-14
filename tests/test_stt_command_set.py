@@ -68,3 +68,21 @@ def test_from_config_falls_back_when_file_missing():
 def test_language_attribute():
     assert _en().language == "en"
     assert _ru().language == "ru"
+
+
+def test_is_dictation_start_ru():
+    ru = _ru()
+    for q in ["начни диктовку", "включи режим диктовки", "перейди в диктовку", "диктуй"]:
+        assert ru.is_dictation_start(q), q
+
+
+def test_is_dictation_start_en():
+    en = _en()
+    assert en.is_dictation_start("start dictation")
+    assert en.is_dictation_start("switch to dictation mode")
+
+
+def test_is_dictation_start_negatives():
+    ru = _ru()
+    for q in ["открой браузер", "какая сегодня погода", "закрой окно"]:
+        assert not ru.is_dictation_start(q), q

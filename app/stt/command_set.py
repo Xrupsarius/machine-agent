@@ -17,6 +17,7 @@ _FALLBACK = {
         "newline": ["новая строка", "с новой строки", "перенос", "новую строку"],
         "delete_word": ["сотри", "сатри", "удали", "стереть", "удалить"],
         "stop": ["стоп", "хватит", "закончи", "останови", "заверши"],
+        "dictation": ["начни диктов", "включи диктов", "режим диктов", "диктовку", "диктовка", "диктуй", "надиктую"],
     },
     "en": {
         "marker": ["omnis", "omni", "omnes", "omniss"],
@@ -24,6 +25,7 @@ _FALLBACK = {
         "newline": ["new line", "newline", "line break", "next line"],
         "delete_word": ["delete", "erase", "backspace", "remove"],
         "stop": ["stop", "halt", "finish", "end"],
+        "dictation": ["start dictation", "dictation mode", "begin dictation", "dictate"],
     },
 }
 
@@ -43,13 +45,20 @@ class CommandSet:
     tolerates STT mistakes so «омни с»/«омнись»/«обнес» still hit the marker.
     """
 
-    def __init__(self, markers: list[str], commands: dict[str, list[str]], language: str = "ru") -> None:
+    def __init__(
+        self,
+        markers: list[str],
+        commands: dict[str, list[str]],
+        language: str = "ru",
+        dictation: list[str] | None = None,
+    ) -> None:
         self.language = language
         self._markers = [_norm(m) for m in markers if m.strip()]
         self._commands = {
             name: [s.lower().strip() for s in commands.get(name, []) if s.strip()]
             for name in _LOCAL_NAMES
         }
+        self._dictation = [s.lower().strip() for s in (dictation or []) if s.strip()]
 
     @classmethod
     def from_config(cls, language: str, path: str = "config/commands.yaml") -> "CommandSet":
@@ -63,7 +72,12 @@ class CommandSet:
         if not lang:
             lang = _FALLBACK.get(language, _FALLBACK["ru"])
         commands = {name: lang.get(name, []) for name in _LOCAL_NAMES}
-        return cls(lang.get("marker", []), commands, language)
+        return cls(lang.get("marker", []), commands, language, lang.get("dictation", []))
+
+    def is_dictation_start(self, text: str) -> bool:
+        """True if a wake-word command asks to switch into dictation mode."""
+        t = text.lower()
+        return any(phrase in t for phrase in self._dictation)
 
     def parse(self, text: str) -> tuple[str, str | None, str | None]:
         """Split a finalized segment into (text_to_type, local_command, agent_command)."""
