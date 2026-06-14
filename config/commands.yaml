@@ -2,11 +2,11 @@
 # `marker` is the prefix word that turns following speech into a command.
 # Matching is fuzzy, so minor STT mistakes (омни с, омнись, обнес) still hit.
 ru:
-  marker: [омнис, омнес, амнис, онис, омнус]
+  marker: [омнис, омнес, амнис, онис, омнус, omnis, omni, omnes]
   submit: [отправь, отправить, отправляй, энтер]
   newline: [новая строка, с новой строки, перенос, новую строку]
   delete_word: [сотри, сатри, удали, стереть, удалить]
-  stop: [стоп, хватит, закончи, останови, заверши]
+  stop: [стоп, стой, хватит, закончи, останови, заверши, отключи, выключи, выйди, stop]
   # Wake-word phrases that switch into dictation mode (matched by substring).
   dictation: [начни диктов, включи диктов, режим диктов, диктовку, диктовка, диктуй, надиктую]
 en:

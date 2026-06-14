@@ -40,6 +40,17 @@ def test_newline_and_delete_and_stop():
     assert _ru().parse("омнис стоп")[1] == "stop"
 
 
+def test_latin_marker_transcription_tolerated():
+    # Whisper often renders the marker in Latin during RU dictation.
+    assert _ru().parse("omnis stop")[1] == "stop"
+    assert _ru().parse("Omnis отключи диктовку")[1] == "stop"
+
+
+def test_stop_synonyms_for_turning_off():
+    for phrase in ["омнис стоп", "омнис стой", "омнис отключи", "омнис выключи", "омнис выйди"]:
+        assert _ru().parse(phrase)[1] == "stop", phrase
+
+
 def test_agent_command_routed():
     body, local, agent = _ru().parse("заметка омнис открой браузер")
     assert local is None
