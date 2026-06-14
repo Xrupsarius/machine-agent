@@ -104,6 +104,20 @@ Settings live in `config.yaml` — no hardcoding. Common options:
 
 **Dictation tuning** (optional, in `config.yaml`): `dictation_silence_seconds`, `dictation_max_segment_seconds`, `dictation_noise_factor` — leave the defaults unless dictation feels too eager or too slow to commit text.
 
+### GPU acceleration (NVIDIA)
+
+Speech recognition runs much faster and more accurately on an NVIDIA GPU. With a CUDA card you can run `medium` or `large-v3` with lower latency than `small` on CPU. Set in `config.yaml`:
+
+```yaml
+stt_model: medium          # or large-v3 / large-v3-turbo
+stt_device: cuda           # cpu to disable GPU
+stt_compute_type: float16  # int8 on CPU
+stt_beam_size: 5           # higher = more accurate; GPU can afford it
+stt_cuda_lib_dir: ""       # blank = auto-detect cuBLAS
+```
+
+CTranslate2 (the Whisper backend) needs CUDA's `libcublas.so.12`. You don't need a full CUDA toolkit — if **Ollama** is installed it already ships the library, and the app auto-loads it from `/usr/local/lib/ollama/cuda_v12`. If your cuBLAS lives elsewhere, point `stt_cuda_lib_dir` at that folder (or add it to `LD_LIBRARY_PATH`). On CPU-only machines keep `stt_device: cpu` and `stt_compute_type: int8`.
+
 ## 4. Run
 
 ```bash
@@ -246,6 +260,20 @@ playwright install chromium
 **Язык:** при самом первом запуске приложение спрашивает рабочий язык (Русский / English) и сохраняет выбор в `data/settings.json`. Поменять можно там же или в `config.yaml` (`language:`). Язык задаёт и распознавание речи, и слова команд диктовки (заданы в `config/commands.yaml`).
 
 **Тонкая настройка диктовки** (необязательно, в `config.yaml`): `dictation_silence_seconds`, `dictation_max_segment_seconds`, `dictation_noise_factor` — меняйте только если диктовка коммитит текст слишком рано или слишком поздно.
+
+### Ускорение на GPU (NVIDIA)
+
+На GPU распознавание речи работает гораздо быстрее и точнее. С CUDA-картой можно гонять `medium` или `large-v3` с задержкой меньше, чем `small` на CPU. В `config.yaml`:
+
+```yaml
+stt_model: medium          # или large-v3 / large-v3-turbo
+stt_device: cuda           # cpu — отключить GPU
+stt_compute_type: float16  # int8 для CPU
+stt_beam_size: 5           # больше = точнее; на GPU не жалко
+stt_cuda_lib_dir: ""       # пусто = авто-поиск cuBLAS
+```
+
+CTranslate2 (движок Whisper) требует `libcublas.so.12` из CUDA. Полный CUDA-тулкит ставить не нужно — если установлен **Ollama**, он уже несёт эту библиотеку, и приложение само подхватит её из `/usr/local/lib/ollama/cuda_v12`. Если cuBLAS лежит в другом месте — укажите папку в `stt_cuda_lib_dir` (или добавьте её в `LD_LIBRARY_PATH`). На машинах без GPU оставьте `stt_device: cpu` и `stt_compute_type: int8`.
 
 ## 4. Запуск
 

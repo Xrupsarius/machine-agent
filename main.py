@@ -127,7 +127,13 @@ def main() -> None:
 
     # STT stack
     mic = MicrophoneService(device_name=config.get("mic_device", ""))
-    whisper = WhisperService(model_name=config.get("stt_model", "small"))
+    whisper = WhisperService(
+        model_name=config.get("stt_model", "small"),
+        device=config.get("stt_device", "cpu"),
+        compute_type=config.get("stt_compute_type", "int8"),
+        beam_size=config.get("stt_beam_size", 1),
+        cuda_lib_dir=config.get("stt_cuda_lib_dir", ""),
+    )
     wakeword = WakeWordService(
         model_dir=config.get("wakeword_models_dir", "config/wakeword_models"),
         threshold=config.get("wakeword_threshold", 0.5),

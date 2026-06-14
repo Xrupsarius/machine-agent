@@ -1,4 +1,4 @@
-stt_model: small
+stt_model: medium
 llm_model: qwen3:8b
 vision_model: moondream
 memory_limit: 200
@@ -18,3 +18,7 @@ dictation_silence_seconds: 1.0
 dictation_max_segment_seconds: 15.0
 dictation_noise_factor: 1.4
 language: ru
+stt_device: cuda          # cuda (NVIDIA GPU) or cpu
+stt_compute_type: float16 # float16 for GPU, int8 for CPU
+stt_beam_size: 5          # higher = more accurate, slower (GPU affords it)
+stt_cuda_lib_dir: ""      # blank = auto-detect (e.g. Ollama's bundled cuBLAS)

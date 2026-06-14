@@ -9,7 +9,7 @@ def test_loads_llm_model():
 
 def test_loads_stt_model():
     cfg = ConfigManager("config.yaml")
-    assert cfg.get("stt_model") == "small"
+    assert cfg.get("stt_model") in {"tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"}
 
 
 def test_loads_wakeword_settings():
