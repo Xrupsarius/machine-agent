@@ -1,7 +1,7 @@
 import json
 import os
 
-from app.tools.app_catalog import AppCatalog, _parse_desktop, _clean_argv
+from app.tools.app_catalog import AppCatalog, _parse_desktop, _clean_argv, is_app_list_query
 
 
 def _write_desktop(path, name, exec_line, extra=""):
@@ -60,6 +60,36 @@ def test_resolve_substring_in_keywords(tmp_path):
 def test_resolve_fuzzy(tmp_path):
     cat = _catalog_with([{"name": "XRay", "binary": "xray", "argv": ["xray"], "keywords": []}], tmp_path)
     assert cat.resolve("x-ray") == ["xray"]
+
+
+def test_app_names_sorted_unique(tmp_path):
+    cat = _catalog_with([
+        {"name": "Obsidian", "binary": "obsidian", "argv": ["obsidian"], "keywords": []},
+        {"name": "Chromium", "binary": "chromium", "argv": ["chromium"], "keywords": []},
+        {"name": "Obsidian", "binary": "obsidian2", "argv": ["obsidian2"], "keywords": []},
+    ], tmp_path)
+    assert cat.app_names() == ["Chromium", "Obsidian"]
+
+
+def test_is_app_list_query_ru():
+    for q in [
+        "какие у меня есть приложения",
+        "выведи список приложений",
+        "какие программы на компьютере",
+        "что у меня установлено",
+        "скажи какие приложения есть",
+    ]:
+        assert is_app_list_query(q), q
+
+
+def test_is_app_list_query_en():
+    assert is_app_list_query("list my apps")
+    assert is_app_list_query("what applications are installed")
+
+
+def test_is_app_list_query_negatives():
+    for q in ["открой приложение для погоды", "закрой это окно", "привет как дела"]:
+        assert not is_app_list_query(q), q
 
 
 def test_resolve_path_binary_exact(tmp_path):

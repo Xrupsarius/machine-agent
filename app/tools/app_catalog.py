@@ -64,6 +64,24 @@ def _normalize(s: str) -> str:
     return re.sub(r"[\s\-_.]", "", s.lower())
 
 
+_APP_LIST_PATTERNS = [
+    r"как[иео]\w*\s+(?:у меня\s+)?(?:есть\s+)?(?:приложени|программ)",
+    r"список\s+(?:приложени|программ)",
+    r"(?:приложени\w*|программ\w*)\s+(?:на|в)\s+компьютер",
+    r"что\s+(?:у меня\s+)?(?:есть\s+)?установлен",
+    r"вывед\w*\s+(?:список\s+)?(?:приложени|программ)",
+    r"list\s+(?:my\s+)?(?:apps|applications|programs)",
+    r"what\s+(?:apps|applications|programs)",
+    r"installed\s+(?:apps|applications|programs)",
+]
+
+
+def is_app_list_query(text: str) -> bool:
+    """True if the user is asking which apps/programs are installed."""
+    t = text.lower()
+    return any(re.search(p, t) for p in _APP_LIST_PATTERNS)
+
+
 def _scan_path_binaries() -> list[str]:
     bins: set[str] = set()
     for d in os.environ.get("PATH", "").split(os.pathsep):
@@ -95,6 +113,10 @@ class AppCatalog:
     @property
     def apps(self) -> list[dict]:
         return list(self._apps)
+
+    def app_names(self) -> list[str]:
+        """Friendly, de-duplicated display names of installed desktop apps."""
+        return sorted({a["name"] for a in self._apps if a.get("name")}, key=str.lower)
 
     def load_or_scan(self) -> None:
         if self._load_cache():

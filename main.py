@@ -38,7 +38,7 @@ from app.tools.tool_executor import ToolExecutor, EVENT_EXECUTION_COMPLETED
 from app.tools.terminal_tool import TerminalTool
 from app.tools.filesystem_tool import FilesystemTool
 from app.tools.desktop_tool import DesktopTool
-from app.tools.app_catalog import AppCatalog
+from app.tools.app_catalog import AppCatalog, is_app_list_query
 from app.stt.command_set import CommandSet
 from app.ui.language_dialog import LanguageDialog
 from app.tools.accessibility_tool import AccessibilityTool
@@ -296,6 +296,18 @@ def main() -> None:
         try:
             _ctx["user_text"] = text
             _ctx["plan"] = {}
+
+            # "What apps do I have?" — answered from the catalog, no LLM needed.
+            if is_app_list_query(text):
+                names = app_catalog.app_names()
+                listing = (
+                    "Установленные приложения:\n" + "\n".join(f"• {n}" for n in names)
+                    if names else "Каталог приложений пуст."
+                )
+                _log(event_bus, listing)
+                _chat("user", text)
+                _chat("assistant", listing)
+                return
 
             # History queries are answered directly from memory — no LLM needed.
             if memory_search.is_history_query(text):
