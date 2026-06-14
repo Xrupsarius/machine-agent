@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import queue
@@ -37,6 +38,8 @@ from app.tools.terminal_tool import TerminalTool
 from app.tools.filesystem_tool import FilesystemTool
 from app.tools.desktop_tool import DesktopTool
 from app.tools.app_catalog import AppCatalog
+from app.stt.command_set import CommandSet
+from app.ui.language_dialog import LanguageDialog
 from app.tools.accessibility_tool import AccessibilityTool
 from app.tools.browser_tool import BrowserTool
 from app.tools.vision_tool import VisionTool
@@ -68,6 +71,24 @@ def _reset_to_idle_after(state_manager: StateManager, delay: float = 3.0) -> Non
     threading.Timer(delay, _reset).start()
 
 
+def _resolve_language(default: str = "ru", path: str = "data/settings.json") -> str:
+    """Return the chosen language, asking once on first run and persisting it."""
+    log = logging.getLogger(__name__)
+    try:
+        if os.path.exists(path):
+            return json.load(open(path, encoding="utf-8")).get("language", default)
+    except Exception as e:
+        log.warning(f"settings load failed: {e}")
+    language = LanguageDialog.choose()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"language": language}, f)
+    except Exception as e:
+        log.warning(f"settings save failed: {e}")
+    return language
+
+
 def main() -> None:
     config = ConfigManager("config.yaml")
     setup_logging(config.get("log_level", "INFO"))
@@ -84,6 +105,10 @@ def main() -> None:
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # ADR-019
+
+    language = _resolve_language(default=config.get("language", "ru"))
+    command_set = CommandSet.from_config(language)
+    log.info(f"Language: {language}")
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sigint_timer = QTimer()
@@ -110,6 +135,7 @@ def main() -> None:
         mic, whisper, state_manager, event_bus,
         silence_threshold=config.get("stt_silence_threshold", 500),
         wakeword=wakeword,
+        language=language,
     )
     registry.register("mic", mic)
     registry.register("whisper", whisper)
@@ -128,6 +154,7 @@ def main() -> None:
         inject_text=lambda t: desktop_tool.execute("type_text", {"text": t}),
         run_key=lambda k: desktop_tool.execute("press_key", {"key": k}),
         run_command=lambda t: _command_queue.put(t),
+        command_set=command_set,
         silence_threshold=config.get("stt_silence_threshold", 500),
         chunk_seconds=config.get("dictation_chunk_seconds", 0.7),
         silence_seconds=config.get("dictation_silence_seconds", 1.0),

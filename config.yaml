@@ -17,3 +17,4 @@ dictation_chunk_seconds: 0.7
 dictation_silence_seconds: 1.0
 dictation_max_segment_seconds: 15.0
 dictation_noise_factor: 1.4
+language: ru

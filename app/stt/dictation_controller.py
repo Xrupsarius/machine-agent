@@ -1,5 +1,4 @@
 import logging
-import re
 import threading
 import time
 from typing import Callable
@@ -8,6 +7,7 @@ import numpy as np
 
 from app.core.event_bus import EventBus
 from app.core.state_manager import StateManager, AppState
+from app.stt.command_set import CommandSet
 from app.stt.microphone_service import MicrophoneService
 from app.stt.streaming_transcriber import StreamingTranscriber
 from app.stt.whisper_service import WhisperService
@@ -19,39 +19,6 @@ EVENT_DICTATION_COMMITTED = "dictation.committed"
 EVENT_DICTATION_STARTED = "dictation.started"
 EVENT_DICTATION_STOPPED = "dictation.stopped"
 EVENT_DICTATION_COMMAND = "dictation.command"
-
-_MARKER_RE = re.compile(
-    r"\b(?:омн[иеё]с|омн[еэ]с|омнус|amnis|omnis|онис)\b[\s,]*",
-    re.IGNORECASE,
-)
-
-_LOCAL_COMMANDS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"^(?:отправ\w*|энтер|enter)[\s.!,;:]*$", re.IGNORECASE), "submit"),
-    (re.compile(r"^(?:нов(?:ая|ую) строк\w*|с новой строки|перенос\w*)[\s.!,;:]*$", re.IGNORECASE), "newline"),
-    (re.compile(r"^(?:сотри|стереть|удали)(?: послед\w+| это| последнее слово)?[\s.!,;:]*$", re.IGNORECASE), "delete_word"),
-    (re.compile(r"^(?:стоп|хватит|закончи\w*|останови\w*)[\s.!,;:]*$", re.IGNORECASE), "stop"),
-]
-
-
-def _split_directive(text: str) -> tuple[str, str | None, str | None]:
-    """Split a finalized segment into (text_to_type, local_command, agent_command).
-
-    A directive is only recognized when prefixed by the marker word (омнис),
-    so it can't be confused with ordinary dictated text. Text after the marker
-    is matched against local editing commands first; anything else is returned
-    as a free-form agent command for the full intent/plan pipeline.
-    """
-    match = _MARKER_RE.search(text)
-    if not match:
-        return text, None, None
-    body = text[: match.start()].strip()
-    rest = text[match.end():].strip()
-    for pattern, name in _LOCAL_COMMANDS:
-        if pattern.match(rest):
-            return body, name, None
-    if rest:
-        return body, None, rest
-    return body, None, None
 
 
 def _rms(audio_bytes: bytes) -> float:
@@ -86,6 +53,7 @@ class DictationController:
         inject_text: Callable[[str], None] | None = None,
         run_key: Callable[[str], None] | None = None,
         run_command: Callable[[str], None] | None = None,
+        command_set: CommandSet | None = None,
         silence_threshold: float = 500.0,
         chunk_seconds: float = 0.7,
         silence_seconds: float = 1.0,
@@ -102,6 +70,7 @@ class DictationController:
         self._inject_text = inject_text
         self._run_key = run_key
         self._run_command = run_command
+        self._command_set = command_set or CommandSet.from_config("ru")
         self._configured_threshold = silence_threshold
         self._silence_threshold = silence_threshold
         self._chunk_seconds = chunk_seconds
@@ -113,7 +82,7 @@ class DictationController:
         self._min_bytes = int(0.3 * mic.sample_rate) * 2
         self._max_bytes = int(max_segment_seconds * mic.sample_rate) * 2
 
-        self._transcriber = StreamingTranscriber(whisper)
+        self._transcriber = StreamingTranscriber(whisper, language=self._command_set.language)
         self._lock = threading.Lock()
         self._segment = bytearray()
         self._silence_streak = 0
@@ -264,7 +233,7 @@ class DictationController:
     def _commit_final(self, final: str) -> None:
         if not final:
             return
-        body, local_command, agent_command = _split_directive(final)
+        body, local_command, agent_command = self._command_set.parse(final)
         if body:
             self._event_bus.publish(EVENT_DICTATION_COMMITTED, {"text": body})
             if self._inject_text is not None:

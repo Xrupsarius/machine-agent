@@ -1,0 +1,15 @@
+# Voice command vocabulary for dictation mode, per language.
+# `marker` is the prefix word that turns following speech into a command.
+# Matching is fuzzy, so minor STT mistakes (омни с, омнись, обнес) still hit.
+ru:
+  marker: [омнис, омнес, амнис, онис, омнус]
+  submit: [отправь, отправить, отправляй, энтер]
+  newline: [новая строка, с новой строки, перенос, новую строку]
+  delete_word: [сотри, сатри, удали, стереть, удалить]
+  stop: [стоп, хватит, закончи, останови, заверши]
+en:
+  marker: [omnis, omni, omnes, omniss]
+  submit: [send, submit, enter, post]
+  newline: [new line, newline, line break, next line]
+  delete_word: [delete, erase, backspace, remove]
+  stop: [stop, halt, finish, end]

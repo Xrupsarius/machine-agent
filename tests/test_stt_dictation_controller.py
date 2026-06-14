@@ -9,7 +9,6 @@ from app.stt.dictation_controller import (
     EVENT_DICTATION_STOPPED,
     EVENT_DICTATION_COMMAND,
     _rms,
-    _split_directive,
     _to_float32,
 )
 
@@ -163,43 +162,6 @@ def test_calibration_keeps_floor_for_quiet_mic():
     ctrl.stop()
 
     assert threshold == 500
-
-
-def test_split_directive_plain_text_has_no_command():
-    body, local, agent = _split_directive("привет мир как дела")
-    assert (local, agent) == (None, None)
-    assert body == "привет мир как дела"
-
-
-def test_split_directive_marker_extracts_submit():
-    body, local, agent = _split_directive("привет мир омнис отправь")
-    assert local == "submit" and agent is None
-    assert body == "привет мир"
-
-
-def test_split_directive_marker_only():
-    body, local, agent = _split_directive("Омнис, отправь.")
-    assert local == "submit" and agent is None
-    assert body == ""
-
-
-def test_split_directive_newline_and_delete():
-    assert _split_directive("омнис новая строка")[1] == "newline"
-    assert _split_directive("омнис сотри последнее")[1] == "delete_word"
-    assert _split_directive("омнис стоп")[1] == "stop"
-
-
-def test_split_directive_routes_unknown_to_agent():
-    body, local, agent = _split_directive("заметка омнис открой браузер")
-    assert local is None
-    assert agent == "открой браузер"
-    assert body == "заметка"
-
-
-def test_split_directive_no_marker_keeps_word():
-    body, local, agent = _split_directive("отправь письмо другу")
-    assert (local, agent) == (None, None)
-    assert body == "отправь письмо другу"
 
 
 def test_commit_final_injects_body():

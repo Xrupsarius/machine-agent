@@ -46,6 +46,7 @@ class SpeechPipeline:
         event_bus: EventBus,
         silence_threshold: float = 500.0,
         wakeword: "WakeWordService | None" = None,
+        language: str = "ru",
     ) -> None:
         self._mic = mic
         self._whisper = whisper
@@ -53,6 +54,7 @@ class SpeechPipeline:
         self._event_bus = event_bus
         self._silence_threshold = silence_threshold
         self._wakeword = wakeword
+        self._language = language
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._active = False
@@ -186,7 +188,7 @@ class SpeechPipeline:
     def _transcribe(self, audio_chunks: list[bytes]) -> None:
         try:
             audio_float = _bytes_to_float32(b"".join(audio_chunks))
-            text = self._whisper.transcribe(audio_float)
+            text = self._whisper.transcribe(audio_float, language=self._language)
             if text:
                 log.info(f"Recognized: '{text}'")
                 self._event_bus.publish(EVENT_SPEECH_RECOGNIZED, {"text": text})
