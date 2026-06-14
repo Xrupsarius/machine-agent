@@ -8,6 +8,7 @@ from app.core.event_bus import EventBus
 from app.core.state_manager import StateManager, AppState, EVENT_STATE_CHANGED
 from app.ui.status_widget import StatusWidget
 from app.ui.activity_log_widget import ActivityLogWidget, EVENT_ACTIVITY_LOG
+from app.ui.dictation_widget import DictationWidget
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +38,17 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._status_widget = StatusWidget()
+        self._dictation_widget = DictationWidget(self._event_bus)
+        self._dictation_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._activity_log = ActivityLogWidget()
         self._activity_log.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
         layout.addWidget(self._status_widget)
+        layout.addWidget(self._dictation_widget)
         layout.addWidget(self._activity_log)
 
     def _subscribe_events(self) -> None:
@@ -58,6 +64,7 @@ class MainWindow(QMainWindow):
         AppState.PLANNING: "Составляю план…",
         AppState.EXECUTING: "Выполняю…",
         AppState.WAITING_CONFIRMATION: "Жду подтверждения",
+        AppState.DICTATING: "Диктовка — говорите",
         AppState.ERROR: "Ошибка",
     }
 
@@ -88,3 +95,7 @@ class MainWindow(QMainWindow):
     @property
     def activity_log(self) -> ActivityLogWidget:
         return self._activity_log
+
+    @property
+    def dictation_widget(self) -> DictationWidget:
+        return self._dictation_widget

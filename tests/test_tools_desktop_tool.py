@@ -251,3 +251,67 @@ def test_execute_sets_action(tool):
         mock_popen.return_value = MagicMock()
         result = tool.execute("open_terminal", {})
         assert result.action == "open_terminal"
+
+
+# --- type_text ---
+
+def _run_ok():
+    m = MagicMock()
+    m.returncode = 0
+    m.stderr = ""
+    return m
+
+
+def test_type_text_empty_fails(tool):
+    result = tool.execute("type_text", {"text": "   "})
+    assert not result.success
+    assert "No text" in result.error
+
+
+def test_type_text_uses_clipboard_paste(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n in ("wl-copy", "ydotool")):
+        with patch("app.tools.desktop_tool.subprocess.run", return_value=_run_ok()) as run:
+            result = tool.execute("type_text", {"text": "привет мир"})
+            assert result.success
+            copy_cmd = run.call_args_list[0][0][0]
+            paste_cmd = run.call_args_list[1][0][0]
+            assert copy_cmd[0] == "wl-copy"
+            assert "привет мир" in copy_cmd
+            assert paste_cmd[0] == "ydotool"
+            assert paste_cmd[1] == "key"
+            assert "29:1" in paste_cmd and "47:1" in paste_cmd
+
+
+def test_type_text_terminal_uses_ctrl_shift_v(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n in ("wl-copy", "ydotool", "hyprctl")):
+        active = MagicMock(returncode=0, stdout='{"class": "kitty"}')
+        with patch("app.tools.desktop_tool.subprocess.run",
+                   side_effect=[_run_ok(), active, _run_ok()]) as run:
+            result = tool.execute("type_text", {"text": "ls"})
+            assert result.success
+            paste_cmd = run.call_args_list[-1][0][0]
+            assert "42:1" in paste_cmd
+
+
+def test_type_text_falls_back_to_wtype_when_paste_fails(tool):
+    fail = MagicMock(returncode=1, stderr="no socket")
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n in ("wl-copy", "ydotool", "wtype")):
+        with patch("app.tools.desktop_tool.subprocess.run", side_effect=[_run_ok(), fail, _run_ok()]) as run:
+            result = tool.execute("type_text", {"text": "test"})
+            assert result.success
+            assert run.call_args_list[-1][0][0][0] == "wtype"
+
+
+def test_type_text_uses_wtype_when_no_ydotool(tool):
+    with patch("app.tools.desktop_tool._has", side_effect=lambda n: n == "wtype"):
+        with patch("app.tools.desktop_tool.subprocess.run", return_value=_run_ok()) as run:
+            result = tool.execute("type_text", {"text": "test"})
+            assert result.success
+            assert run.call_args[0][0][0] == "wtype"
+
+
+def test_type_text_no_tools_fails(tool):
+    with patch("app.tools.desktop_tool._has", return_value=False):
+        result = tool.execute("type_text", {"text": "hi"})
+        assert not result.success
+        assert "ydotool" in result.error

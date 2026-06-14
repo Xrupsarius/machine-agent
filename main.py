@@ -24,6 +24,8 @@ from app.stt.wakeword_service import WakeWordService, EVENT_WAKE_WORD_DETECTED
 from app.stt.speech_pipeline import (
     SpeechPipeline, EVENT_SPEECH_RECOGNIZED, EVENT_STT_ERROR, EVENT_STT_EMPTY,
 )
+from app.stt.dictation_controller import DictationController
+from app.ui.dictation_widget import EVENT_DICTATION_TOGGLE
 from app.agent.llm_service import LLMService, OllamaConnectionError
 from app.agent.prompt_manager import PromptManager
 from app.agent.intent_parser import IntentParser, EVENT_INTENT_PARSED
@@ -112,6 +114,18 @@ def main() -> None:
     registry.register("whisper", whisper)
     registry.register("wakeword", wakeword)
     registry.register("pipeline", pipeline)
+
+    dictation = DictationController(
+        mic, whisper, state_manager, event_bus,
+        pause_listening=pipeline.stop,
+        resume_listening=pipeline.start,
+        silence_threshold=config.get("stt_silence_threshold", 500),
+        chunk_seconds=config.get("dictation_chunk_seconds", 0.7),
+        silence_seconds=config.get("dictation_silence_seconds", 1.0),
+        max_segment_seconds=config.get("dictation_max_segment_seconds", 15.0),
+        noise_factor=config.get("dictation_noise_factor", 1.4),
+    )
+    registry.register("dictation", dictation)
 
     # Agent stack
     prompts = PromptManager()
@@ -388,6 +402,9 @@ def main() -> None:
         else:
             pipeline.start()
 
+    def _on_dictation_toggle(_) -> None:
+        threading.Thread(target=dictation.toggle, daemon=True, name="DictationToggle").start()
+
     event_bus.subscribe(EVENT_WAKE_WORD_DETECTED, _on_wakeword)
     event_bus.subscribe(EVENT_SPEECH_RECOGNIZED, _on_speech)
     event_bus.subscribe(EVENT_INTENT_PARSED, _on_intent)
@@ -398,9 +415,12 @@ def main() -> None:
     event_bus.subscribe(EVENT_STT_ERROR, _on_stt_error)
     event_bus.subscribe(EVENT_STT_EMPTY, _on_stt_empty)
     event_bus.subscribe("tray.mute", _on_mute)
+    event_bus.subscribe(EVENT_DICTATION_TOGGLE, _on_dictation_toggle)
 
     def _on_app_quit() -> None:
         log.info("Shutting down gracefully...")
+        if dictation.is_active:
+            dictation.stop()
         pipeline.stop()
         if tool_registry.has("browser"):
             try:

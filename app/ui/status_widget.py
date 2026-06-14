@@ -9,6 +9,7 @@ STATUS_COLORS = {
     AppState.PLANNING:              "#8B5CF6",
     AppState.EXECUTING:             "#10B981",
     AppState.WAITING_CONFIRMATION:  "#F97316",
+    AppState.DICTATING:             "#0EA5E9",
     AppState.ERROR:                 "#EF4444",
 }
 
@@ -19,6 +20,7 @@ STATUS_LABELS = {
     AppState.PLANNING:              "Планирую...",
     AppState.EXECUTING:             "Выполняю...",
     AppState.WAITING_CONFIRMATION:  "Требуется подтверждение",
+    AppState.DICTATING:             "Диктовка...",
     AppState.ERROR:                 "Ошибка",
 }
 

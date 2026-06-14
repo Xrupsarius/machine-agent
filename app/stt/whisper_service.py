@@ -28,11 +28,11 @@ class WhisperService:
         )
         log.info("Whisper model loaded")
 
-    def transcribe(self, audio: np.ndarray, language: str = "ru") -> str:
+    def transcribe(self, audio: np.ndarray, language: str = "ru", vad_filter: bool = True) -> str:
         if self._model is None:
             raise RuntimeError("WhisperService not loaded — call load() first")
         segments, info = self._model.transcribe(
-            audio, language=language, vad_filter=True, beam_size=1,
+            audio, language=language, vad_filter=vad_filter, beam_size=1,
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         log.debug(

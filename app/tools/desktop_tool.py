@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 
 from app.tools.base_tool import BaseTool, ToolResult
 
@@ -292,75 +291,64 @@ class DesktopTool(BaseTool):
             error="close_active_window requires hyprctl or xdotool",
         )
 
+    def _type_text(self, text: str) -> ToolResult:
+        if not text.strip():
+            return ToolResult(success=False, error="No text provided")
+
+        if _has("wl-copy") and _has("ydotool"):
+            result = self._paste_text(text)
+            if result is not None:
+                return result
+
+        if _has("wtype"):
+            proc = subprocess.run(
+                ["wtype", "-s", "50", "-d", "8", "--", text],
+                capture_output=True, text=True,
+            )
+            if proc.returncode == 0:
+                return ToolResult(success=True, output=f"Typed: {text}")
+            return ToolResult(success=False, error=proc.stderr.strip() or "wtype failed")
+
+        return ToolResult(
+            success=False,
+            error="type_text requires wl-copy+ydotool or wtype. Install: sudo pacman -S wl-clipboard ydotool",
+        )
+
+    def _paste_text(self, text: str) -> ToolResult | None:
+        try:
+            subprocess.run(
+                ["wl-copy", "--", text],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=5,
+            )
+        except Exception as e:
+            log.warning(f"wl-copy failed ({e}) — falling back to wtype")
+            return None
+
+        if self._active_window_is_terminal():
+            keys = ["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
+        else:
+            keys = ["29:1", "47:1", "47:0", "29:0"]
+        proc = subprocess.run(["ydotool", "key", *keys], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return ToolResult(success=True, output=f"Typed: {text}")
+        log.warning(f"ydotool paste failed ({proc.stderr.strip()!r}) — falling back to wtype")
+        return None
+
     def _active_window_is_terminal(self) -> bool:
         if not _has("hyprctl"):
             return False
         try:
             proc = subprocess.run(
                 ["hyprctl", "activewindow", "-j"],
-                capture_output=True, text=True, timeout=3,
+                capture_output=True, text=True, timeout=2,
             )
-            cls = json.loads(proc.stdout).get("class", "").lower()
+            if proc.returncode != 0:
+                return False
+            cls = (json.loads(proc.stdout).get("class") or "").lower()
         except Exception:
             return False
-        return any(t in cls for t in ("kitty", "alacritty", "konsole", "terminal", "xterm", "foot"))
-
-    def _paste_text(self, text: str) -> ToolResult | None:
-        if not (_has("wl-copy") and _has("wtype")):
-            return None
-        copy = subprocess.run(
-            ["wl-copy", "--", text],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
-        )
-        if copy.returncode != 0:
-            return None
-        time.sleep(0.2)
-        if self._active_window_is_terminal():
-            keys = ["-M", "ctrl", "-M", "shift", "-P", "v", "-p", "v", "-m", "shift", "-m", "ctrl"]
-        else:
-            keys = ["-M", "ctrl", "-P", "v", "-p", "v", "-m", "ctrl"]
-        proc = subprocess.run(["wtype"] + keys, capture_output=True, text=True)
-        if proc.returncode == 0:
-            return ToolResult(success=True, output=f"Typed: {text}")
-        return None
-
-    def _type_text(self, text: str) -> ToolResult:
-        if not text.strip():
-            return ToolResult(success=False, error="No text provided")
-
-        pasted = self._paste_text(text)
-        if pasted is not None:
-            return pasted
-
-        if _has("wtype"):
-            proc = subprocess.run(
-                ["wtype", "-s", "200", "-d", "12", text],
-                capture_output=True, text=True,
-            )
-            if proc.returncode == 0:
-                return ToolResult(success=True, output=f"Typed: {text}")
-            return ToolResult(success=False, error=proc.stderr.strip() or "wtype failed")
-        if _has("ydotool"):
-            proc = subprocess.run(
-                ["ydotool", "type", "--key-delay", "12", "--", text],
-                capture_output=True, text=True,
-            )
-            if proc.returncode == 0:
-                return ToolResult(success=True, output=f"Typed: {text}")
-            return ToolResult(success=False, error=proc.stderr.strip() or "ydotool failed")
-        if _has("xdotool"):
-            proc = subprocess.run(
-                ["xdotool", "type", "--delay", "12", "--", text],
-                capture_output=True, text=True,
-            )
-            if proc.returncode == 0:
-                return ToolResult(success=True, output=f"Typed: {text}")
-            return ToolResult(success=False, error=proc.stderr.strip() or "xdotool failed")
-
-        return ToolResult(
-            success=False,
-            error="type_text requires wtype, ydotool, or xdotool. Install: sudo pacman -S wtype",
-        )
+        return any(term in cls for term in _TERMINAL_EMULATORS) or "foot" in cls or "wezterm" in cls
 
     def _open_terminal(self) -> ToolResult:
         for emulator in _TERMINAL_EMULATORS:
