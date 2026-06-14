@@ -27,6 +27,7 @@ from app.stt.speech_pipeline import (
 )
 from app.stt.dictation_controller import DictationController
 from app.ui.dictation_widget import EVENT_DICTATION_TOGGLE
+from app.ui.chat_widget import EVENT_CHAT_MESSAGE
 from app.agent.llm_service import LLMService, OllamaConnectionError
 from app.agent.prompt_manager import PromptManager
 from app.agent.intent_parser import IntentParser, EVENT_INTENT_PARSED
@@ -227,10 +228,12 @@ def main() -> None:
 
     def _chat_reply(user_text: str) -> None:
         try:
+            event_bus.publish(EVENT_CHAT_MESSAGE, {"role": "user", "text": user_text})
             _chat_history.append({"role": "user", "content": user_text})
             messages = [{"role": "system", "content": prompts.get("chat")}] + _chat_history[-10:]
             answer = llm.chat(messages, think=False).strip()
             _chat_history.append({"role": "assistant", "content": answer})
+            event_bus.publish(EVENT_CHAT_MESSAGE, {"role": "assistant", "text": answer})
             _log(event_bus, f"🤖 {answer}", "success")
             memory_service.save(
                 user_command=user_text,

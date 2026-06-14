@@ -1,6 +1,6 @@
 import logging
 
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QSizePolicy
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QFrame
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtCore import Qt, Signal
 
@@ -9,6 +9,7 @@ from app.core.state_manager import StateManager, AppState, EVENT_STATE_CHANGED
 from app.ui.status_widget import StatusWidget
 from app.ui.activity_log_widget import ActivityLogWidget, EVENT_ACTIVITY_LOG
 from app.ui.dictation_widget import DictationWidget
+from app.ui.chat_widget import ChatWidget
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Machine Agent")
-        self.setMinimumSize(440, 540)
+        self.setMinimumSize(680, 540)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -38,17 +39,28 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._status_widget = StatusWidget()
+        self._chat_widget = ChatWidget(self._event_bus)
         self._dictation_widget = DictationWidget(self._event_bus)
-        self._dictation_widget.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        for w in (self._chat_widget, self._dictation_widget):
+            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._activity_log = ActivityLogWidget()
         self._activity_log.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setStyleSheet("color: #D1D5DB;")
+
+        split = QHBoxLayout()
+        split.setContentsMargins(0, 0, 0, 0)
+        split.setSpacing(0)
+        split.addWidget(self._chat_widget, 1)
+        split.addWidget(separator)
+        split.addWidget(self._dictation_widget, 1)
+
         layout.addWidget(self._status_widget)
-        layout.addWidget(self._dictation_widget)
+        layout.addLayout(split, 1)
         layout.addWidget(self._activity_log)
 
     def _subscribe_events(self) -> None:
@@ -99,3 +111,7 @@ class MainWindow(QMainWindow):
     @property
     def dictation_widget(self) -> DictationWidget:
         return self._dictation_widget
+
+    @property
+    def chat_widget(self) -> ChatWidget:
+        return self._chat_widget

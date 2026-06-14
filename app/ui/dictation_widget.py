@@ -33,7 +33,9 @@ class DictationWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        bar = QHBoxLayout()
+        bar_widget = QWidget()
+        bar_widget.setFixedHeight(44)
+        bar = QHBoxLayout(bar_widget)
         bar.setContentsMargins(16, 6, 16, 6)
         self._header = QLabel("Диктовка")
         self._header.setStyleSheet("font-weight: bold;")
@@ -48,7 +50,7 @@ class DictationWidget(QWidget):
         self._text.setReadOnly(True)
         self._text.setStyleSheet("font-size: 14px; border: none;")
 
-        layout.addLayout(bar)
+        layout.addWidget(bar_widget)
         layout.addWidget(self._text)
 
     def _subscribe_events(self) -> None:
