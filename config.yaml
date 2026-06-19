@@ -1,4 +1,5 @@
 stt_model: medium
+#llm_model: qwen3.5:9b
 llm_model: qwen3:8b
 vision_model: moondream
 memory_limit: 200
@@ -11,13 +12,14 @@ terminal_timeout: 30
 memory_db_path: data/memory.db
 browser_headless: false
 browser_executable: ""
-wakeword_threshold: 0.3
+wakeword_threshold: 0.4
 wakeword_models_dir: config/wakeword_models
 dictation_chunk_seconds: 0.7
 dictation_silence_seconds: 1.0
 dictation_max_segment_seconds: 15.0
 dictation_noise_factor: 1.4
 language: ru
+activation_mode: wakeword # wakeword (say "Hey OMNIS") or ptt (hold Control). The UI button overrides this live.
 stt_device: cuda          # cuda (NVIDIA GPU) or cpu
 stt_compute_type: float16 # float16 for GPU, int8 for CPU
 stt_beam_size: 5          # higher = more accurate, slower (GPU affords it)

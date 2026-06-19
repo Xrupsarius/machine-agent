@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 EVENT_SPEECH_RECOGNIZED = "speech.recognized"
 EVENT_STT_ERROR = "stt.error"
 EVENT_STT_EMPTY = "stt.empty"
+EVENT_PTT_TEXT = "ptt.text"  # push-to-talk dictation → typed at the cursor
 
 # VAD — chunks of 80 ms at 16 kHz / 1280 samples
 _SPEECH_CHUNKS_MIN = 3     # ~240 ms of sound to start recording
@@ -47,6 +48,7 @@ class SpeechPipeline:
         silence_threshold: float = 500.0,
         wakeword: "WakeWordService | None" = None,
         language: str = "ru",
+        activation_mode: str = "wakeword",
     ) -> None:
         self._mic = mic
         self._whisper = whisper
@@ -55,9 +57,37 @@ class SpeechPipeline:
         self._silence_threshold = silence_threshold
         self._wakeword = wakeword
         self._language = language
+        self._activation_mode = activation_mode
+        self._ptt_active = threading.Event()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._active = False
+
+    @property
+    def activation_mode(self) -> str:
+        return self._activation_mode
+
+    def set_activation_mode(self, mode: str) -> None:
+        """Switch between 'wakeword' and 'ptt'. Restarts the loop if running."""
+        if mode == self._activation_mode:
+            return
+        was_active = self._active
+        if was_active:
+            self.stop()
+        self._activation_mode = mode
+        self._ptt_active.clear()
+        if was_active:
+            self.start()
+
+    def ptt_start(self) -> None:
+        """Begin recording (push-to-talk key pressed). No-op outside ptt mode."""
+        log.info("PTT pressed (SIGUSR1) — start recording")
+        self._ptt_active.set()
+
+    def ptt_stop(self) -> None:
+        """Finalize recording (push-to-talk key released)."""
+        log.info("PTT released (SIGUSR2) — stop recording")
+        self._ptt_active.clear()
 
     def start(self) -> None:
         if self._active:
@@ -76,10 +106,7 @@ class SpeechPipeline:
             self._wakeword.load()
         self._thread = threading.Thread(target=self._run, daemon=True, name="SpeechPipeline")
         self._thread.start()
-        log.info(
-            f"SpeechPipeline started "
-            f"(wake-word={'enabled' if self._wakeword else 'disabled'})"
-        )
+        log.info(f"SpeechPipeline started (activation_mode={self._activation_mode})")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -95,6 +122,70 @@ class SpeechPipeline:
     # ------------------------------------------------------------------
 
     def _run(self) -> None:
+        if self._activation_mode == "ptt":
+            self._run_ptt()
+        else:
+            self._run_wakeword()
+
+    def _run_ptt(self) -> None:
+        speech_buffer: list[bytes] = []
+        recording = False
+        startup_chunks = 0
+        startup_max_rms = 0.0
+
+        while not self._stop_event.is_set():
+            try:
+                chunk = self._mic.read_chunk()
+            except Exception as e:
+                log.error(f"Microphone read error: {e}")
+                self._event_bus.publish(EVENT_STT_ERROR, {"error": str(e)})
+                self._active = False
+                break
+
+            if startup_chunks <= 80:
+                if startup_chunks < 80:
+                    startup_max_rms = max(startup_max_rms, _rms(chunk))
+                elif startup_max_rms < 5.0:
+                    log.warning(f"Microphone delivers silence (max RMS={startup_max_rms:.1f} over first 5s)")
+                    self._event_bus.publish(EVENT_STT_ERROR, {
+                        "error": "Microphone delivers silence — check mic_device in config.yaml"
+                    })
+                startup_chunks += 1
+
+            if self._ptt_active.is_set():
+                if not recording:
+                    recording = True
+                    speech_buffer = []
+                    self._state_manager.set_state(AppState.LISTENING)
+                    log.info("PTT recording…")
+                speech_buffer.append(chunk)
+            elif recording:
+                recording = False
+                self._state_manager.set_state(AppState.THINKING)
+                log.info(f"PTT transcribing {len(speech_buffer)} chunks…")
+                self._transcribe_ptt(speech_buffer)
+                speech_buffer = []
+
+        self._state_manager.set_state(AppState.IDLE)
+
+    def _transcribe_ptt(self, audio_chunks: list[bytes]) -> None:
+        """Transcribe a push-to-talk segment and emit it for typing at the cursor."""
+        try:
+            audio_float = _bytes_to_float32(b"".join(audio_chunks))
+            text = self._whisper.transcribe(audio_float, language=self._language)
+            if text:
+                log.info(f"PTT recognized: '{text}'")
+                self._event_bus.publish(EVENT_PTT_TEXT, {"text": text})
+            else:
+                log.info("PTT: nothing recognized")
+                self._event_bus.publish(EVENT_STT_EMPTY, {})
+        except Exception as e:
+            log.error(f"PTT transcription error: {e}")
+            self._event_bus.publish(EVENT_STT_ERROR, {"error": str(e)})
+        finally:
+            self._state_manager.set_state(AppState.IDLE)
+
+    def _run_wakeword(self) -> None:
         waiting_for_wakeword = self._wakeword is not None
         pre_buffer: list[bytes] = []
         speech_buffer: list[bytes] = []

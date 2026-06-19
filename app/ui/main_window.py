@@ -1,6 +1,8 @@
 import logging
 
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QFrame
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QFrame, QPushButton,
+)
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtCore import Qt, Signal
 
@@ -13,10 +15,19 @@ from app.ui.chat_widget import ChatWidget
 
 log = logging.getLogger(__name__)
 
+EVENT_ACTIVATION_MODE_TOGGLE = "activation.mode.toggle"
+EVENT_ACTIVATION_MODE_CHANGED = "activation.mode.changed"
+
+_MODE_LABELS = {
+    "wakeword": "🔊 Wake word",
+    "ptt": "📻 Рация",
+}
+
 
 class MainWindow(QMainWindow):
     _sig_state = Signal(object)
     _sig_activity = Signal(str, str)
+    _sig_mode = Signal(str)
 
     def __init__(self, state_manager: StateManager, event_bus: EventBus, parent=None) -> None:
         super().__init__(parent)
@@ -39,6 +50,19 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._status_widget = StatusWidget()
+        self._status_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._mode_button = QPushButton(_MODE_LABELS["wakeword"])
+        self._mode_button.setToolTip("Режим активации — нажмите, чтобы переключить")
+        self._mode_button.clicked.connect(self._on_mode_button)
+
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 16, 0)
+        top_bar.setSpacing(0)
+        top_bar.addWidget(self._status_widget, 1)
+        top_bar.addWidget(self._mode_button)
+
         self._chat_widget = ChatWidget(self._event_bus)
         self._dictation_widget = DictationWidget(self._event_bus)
         for w in (self._chat_widget, self._dictation_widget):
@@ -59,15 +83,20 @@ class MainWindow(QMainWindow):
         split.addWidget(separator)
         split.addWidget(self._dictation_widget, 1)
 
-        layout.addWidget(self._status_widget)
+        layout.addLayout(top_bar)
         layout.addLayout(split, 1)
         layout.addWidget(self._activity_log)
 
     def _subscribe_events(self) -> None:
         self._sig_state.connect(self._apply_state)
         self._sig_activity.connect(self._apply_activity)
+        self._sig_mode.connect(self._apply_mode)
         self._event_bus.subscribe(EVENT_STATE_CHANGED, self._on_state_changed)
         self._event_bus.subscribe(EVENT_ACTIVITY_LOG, self._on_activity_log)
+        self._event_bus.subscribe(
+            EVENT_ACTIVATION_MODE_CHANGED,
+            lambda d: self._sig_mode.emit(d.get("mode", "wakeword")),
+        )
 
     _STATE_LABELS = {
         AppState.IDLE: "Ожидание — жду wake word",
@@ -93,6 +122,15 @@ class MainWindow(QMainWindow):
 
     def _apply_activity(self, text: str, level: str) -> None:
         self._activity_log.add_entry(text, level)
+
+    def _on_mode_button(self) -> None:
+        self._event_bus.publish(EVENT_ACTIVATION_MODE_TOGGLE, {})
+
+    def _apply_mode(self, mode: str) -> None:
+        self._mode_button.setText(_MODE_LABELS.get(mode, mode))
+
+    def set_activation_mode(self, mode: str) -> None:
+        self._sig_mode.emit(mode)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # ADR-019: close hides the window, process stays alive

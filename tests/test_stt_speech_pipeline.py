@@ -9,6 +9,7 @@ from app.stt.speech_pipeline import (
     SpeechPipeline,
     EVENT_SPEECH_RECOGNIZED,
     EVENT_STT_ERROR,
+    EVENT_PTT_TEXT,
     _rms,
     _bytes_to_float32,
 )
@@ -231,6 +232,66 @@ def test_wakeword_reset_called_after_transcription_with_wakeword():
     # _transcribe itself doesn't call wakeword.reset(); that happens in _run after
     # transcription. We test it by checking ww.reset is available and callable.
     assert callable(ww.reset)
+
+
+# --- push-to-talk (Control key) mode ---
+
+def test_default_activation_mode_is_wakeword():
+    pipeline, _, _ = _make_pipeline()
+    assert pipeline.activation_mode == "wakeword"
+
+
+def test_ptt_start_stop_toggle_flag():
+    bus = EventBus()
+    sm = StateManager(bus)
+    pipeline = SpeechPipeline(MagicMock(), MagicMock(), sm, bus, activation_mode="ptt")
+    assert not pipeline._ptt_active.is_set()
+    pipeline.ptt_start()
+    assert pipeline._ptt_active.is_set()
+    pipeline.ptt_stop()
+    assert not pipeline._ptt_active.is_set()
+
+
+def test_ptt_records_while_held_then_transcribes_on_release():
+    import time
+    mic = MagicMock()
+    mic.read_chunk.return_value = _loud()
+    whisper = MagicMock()
+    whisper.transcribe.return_value = "открой браузер"
+    bus = EventBus()
+    sm = StateManager(bus)
+    pipeline = SpeechPipeline(mic, whisper, sm, bus, activation_mode="ptt")
+
+    typed = []
+    bus.subscribe(EVENT_PTT_TEXT, lambda d: typed.append(d))
+
+    pipeline.start()
+    pipeline.ptt_start()
+    time.sleep(0.1)          # let the loop accumulate a few chunks
+    pipeline.ptt_stop()
+    time.sleep(0.1)          # let the release path transcribe
+    pipeline.stop()
+
+    assert whisper.transcribe.called
+    assert typed and typed[0]["text"] == "открой браузер"
+
+
+def test_set_activation_mode_switches_without_restart_when_idle():
+    pipeline, _, _ = _make_pipeline()
+    assert not pipeline.is_active
+    pipeline.set_activation_mode("ptt")
+    assert pipeline.activation_mode == "ptt"
+    assert not pipeline.is_active
+
+
+def test_set_activation_mode_noop_when_same():
+    mic = MagicMock()
+    mic.read_chunk.return_value = _SILENT
+    pipeline, _, _ = _make_pipeline(mic)
+    pipeline.start()
+    pipeline.set_activation_mode("wakeword")  # already wakeword
+    assert pipeline.is_active
+    pipeline.stop()
 
 
 def test_active_resets_to_false_on_mic_read_error():

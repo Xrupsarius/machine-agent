@@ -15,7 +15,9 @@ from app.core.config_manager import ConfigManager
 from app.core.event_bus import EventBus
 from app.core.state_manager import StateManager, AppState
 from app.core.service_registry import ServiceRegistry
-from app.ui.main_window import MainWindow
+from app.ui.main_window import (
+    MainWindow, EVENT_ACTIVATION_MODE_TOGGLE, EVENT_ACTIVATION_MODE_CHANGED,
+)
 from app.ui.activity_log_widget import EVENT_ACTIVITY_LOG
 from app.ui.tray_icon import TrayIcon
 from app.ui.confirmation_dialog import ConfirmationDialog
@@ -24,6 +26,7 @@ from app.stt.whisper_service import WhisperService
 from app.stt.wakeword_service import WakeWordService, EVENT_WAKE_WORD_DETECTED
 from app.stt.speech_pipeline import (
     SpeechPipeline, EVENT_SPEECH_RECOGNIZED, EVENT_STT_ERROR, EVENT_STT_EMPTY,
+    EVENT_PTT_TEXT,
 )
 from app.stt.dictation_controller import DictationController
 from app.ui.dictation_widget import EVENT_DICTATION_TOGGLE
@@ -72,21 +75,36 @@ def _reset_to_idle_after(state_manager: StateManager, delay: float = 3.0) -> Non
     threading.Timer(delay, _reset).start()
 
 
-def _resolve_language(default: str = "ru", path: str = "data/settings.json") -> str:
-    """Return the chosen language, asking once on first run and persisting it."""
-    log = logging.getLogger(__name__)
+_SETTINGS_PATH = "data/settings.json"
+
+
+def _load_settings(path: str = _SETTINGS_PATH) -> dict:
     try:
         if os.path.exists(path):
-            return json.load(open(path, encoding="utf-8")).get("language", default)
+            return json.load(open(path, encoding="utf-8"))
     except Exception as e:
-        log.warning(f"settings load failed: {e}")
-    language = LanguageDialog.choose()
+        logging.getLogger(__name__).warning(f"settings load failed: {e}")
+    return {}
+
+
+def _save_setting(key: str, value, path: str = _SETTINGS_PATH) -> None:
+    settings = _load_settings(path)
+    settings[key] = value
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"language": language}, f)
+            json.dump(settings, f)
     except Exception as e:
-        log.warning(f"settings save failed: {e}")
+        logging.getLogger(__name__).warning(f"settings save failed: {e}")
+
+
+def _resolve_language(default: str = "ru", path: str = _SETTINGS_PATH) -> str:
+    """Return the chosen language, asking once on first run and persisting it."""
+    settings = _load_settings(path)
+    if "language" in settings:
+        return settings["language"]
+    language = LanguageDialog.choose()
+    _save_setting("language", language, path)
     return language
 
 
@@ -111,6 +129,14 @@ def main() -> None:
     command_set = CommandSet.from_config(language)
     log.info(f"Language: {language}")
 
+    # Activation mode: settings.json (live UI choice) overrides config.yaml default.
+    activation_mode = _load_settings().get(
+        "activation_mode", config.get("activation_mode", "wakeword")
+    )
+    if activation_mode not in ("wakeword", "ptt"):
+        activation_mode = "wakeword"
+    log.info(f"Activation mode: {activation_mode}")
+
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sigint_timer = QTimer()
     sigint_timer.timeout.connect(lambda: None)
@@ -122,6 +148,7 @@ def main() -> None:
     tray = TrayIcon(window, event_bus)
     tray.show()
     window.show()
+    window.set_activation_mode(activation_mode)
     registry.register("window", window)
     registry.register("tray", tray)
 
@@ -143,11 +170,25 @@ def main() -> None:
         silence_threshold=config.get("stt_silence_threshold", 500),
         wakeword=wakeword,
         language=language,
+        activation_mode=activation_mode,
     )
     registry.register("mic", mic)
     registry.register("whisper", whisper)
     registry.register("wakeword", wakeword)
     registry.register("pipeline", pipeline)
+
+    # Push-to-talk: a Hyprland keybind signals this process (SIGUSR1 on key
+    # press, SIGUSR2 on release). The PID file lets the keybind find us.
+    pid_path = config.get("pid_path", "data/app.pid")
+    try:
+        os.makedirs(os.path.dirname(pid_path) or ".", exist_ok=True)
+        with open(pid_path, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        log.warning(f"Could not write PID file {pid_path}: {e}")
+
+    signal.signal(signal.SIGUSR1, lambda *_: pipeline.ptt_start())
+    signal.signal(signal.SIGUSR2, lambda *_: pipeline.ptt_stop())
 
     app_catalog = AppCatalog(cache_path=config.get("app_catalog_path", "data/app_catalog.json"))
     threading.Thread(target=app_catalog.load_or_scan, daemon=True, name="AppCatalogScan").start()
@@ -487,6 +528,34 @@ def main() -> None:
     def _on_dictation_toggle(_) -> None:
         threading.Thread(target=dictation.toggle, daemon=True, name="DictationToggle").start()
 
+    def _on_ptt_text(data: dict) -> None:
+        text = data.get("text", "")
+        if not text:
+            return
+        _log(event_bus, f"📻 Печатаю под курсором: {text}")
+
+        def _inject() -> None:
+            try:
+                result = desktop_tool.execute("type_text", {"text": text})
+                if not result.success:
+                    _log(event_bus, f"Не удалось напечатать: {result.error}", "error")
+            except Exception as e:
+                log.error(f"PTT inject error: {e}", exc_info=True)
+                _log(event_bus, f"Ошибка печати: {e}", "error")
+
+        threading.Thread(target=_inject, daemon=True, name="PTTInject").start()
+
+    def _on_activation_mode_toggle(_) -> None:
+        new_mode = "ptt" if pipeline.activation_mode == "wakeword" else "wakeword"
+        pipeline.set_activation_mode(new_mode)
+        _save_setting("activation_mode", new_mode)
+        if new_mode == "ptt":
+            _log(event_bus, "Режим активации: 📻 Рация — зажми клавишу и говори", "success")
+        else:
+            words = ", ".join(wakeword.active_models) or "нет моделей!"
+            _log(event_bus, f"Режим активации: 🔊 wake word ({words})", "success")
+        event_bus.publish(EVENT_ACTIVATION_MODE_CHANGED, {"mode": new_mode})
+
     event_bus.subscribe(EVENT_WAKE_WORD_DETECTED, _on_wakeword)
     event_bus.subscribe(EVENT_SPEECH_RECOGNIZED, _on_speech)
     event_bus.subscribe(EVENT_INTENT_PARSED, _on_intent)
@@ -498,6 +567,8 @@ def main() -> None:
     event_bus.subscribe(EVENT_STT_EMPTY, _on_stt_empty)
     event_bus.subscribe("tray.mute", _on_mute)
     event_bus.subscribe(EVENT_DICTATION_TOGGLE, _on_dictation_toggle)
+    event_bus.subscribe(EVENT_ACTIVATION_MODE_TOGGLE, _on_activation_mode_toggle)
+    event_bus.subscribe(EVENT_PTT_TEXT, _on_ptt_text)
 
     def _on_app_quit() -> None:
         log.info("Shutting down gracefully...")
@@ -509,6 +580,11 @@ def main() -> None:
                 tool_registry.get("browser").execute("close_browser", {})
             except Exception as e:
                 log.warning(f"Browser close error on quit: {e}")
+        try:
+            if os.path.exists(pid_path):
+                os.remove(pid_path)
+        except Exception as e:
+            log.warning(f"Could not remove PID file: {e}")
         log.info("Shutdown complete.")
 
     app.aboutToQuit.connect(_on_app_quit)
@@ -520,8 +596,11 @@ def main() -> None:
     log.info(f"Services: {registry.all_names()}")
     log.info("Machine Agent ready.")
     if pipeline.is_active:
-        words = ", ".join(wakeword.active_models) or "нет моделей!"
-        _log(event_bus, f"✅ Агент запущен. Активация по слову: {words}", "success")
+        if activation_mode == "ptt":
+            _log(event_bus, "✅ Агент запущен. Активация: 📻 Рация — зажми клавишу и говори", "success")
+        else:
+            words = ", ".join(wakeword.active_models) or "нет моделей!"
+            _log(event_bus, f"✅ Агент запущен. Активация по слову: {words}", "success")
     else:
         _log(event_bus, "Агент запущен, но микрофон недоступен", "warning")
 
