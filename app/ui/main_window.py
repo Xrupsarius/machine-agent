@@ -2,6 +2,7 @@ import logging
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QFrame, QPushButton,
+    QDialog,
 )
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtCore import Qt, Signal
@@ -12,11 +13,14 @@ from app.ui.status_widget import StatusWidget
 from app.ui.activity_log_widget import ActivityLogWidget, EVENT_ACTIVITY_LOG
 from app.ui.dictation_widget import DictationWidget
 from app.ui.chat_widget import ChatWidget
+from app.ui.key_capture_dialog import KeyCaptureDialog
 
 log = logging.getLogger(__name__)
 
 EVENT_ACTIVATION_MODE_TOGGLE = "activation.mode.toggle"
 EVENT_ACTIVATION_MODE_CHANGED = "activation.mode.changed"
+EVENT_PTT_KEY_SET = "ptt.key.set"
+EVENT_PTT_KEY_RESET = "ptt.key.reset"
 
 _MODE_LABELS = {
     "wakeword": "🔊 Wake word",
@@ -28,6 +32,7 @@ class MainWindow(QMainWindow):
     _sig_state = Signal(object)
     _sig_activity = Signal(str, str)
     _sig_mode = Signal(str)
+    _sig_ptt_key = Signal(str)
 
     def __init__(self, state_manager: StateManager, event_bus: EventBus, parent=None) -> None:
         super().__init__(parent)
@@ -57,10 +62,15 @@ class MainWindow(QMainWindow):
         self._mode_button.setToolTip("Режим активации — нажмите, чтобы переключить")
         self._mode_button.clicked.connect(self._on_mode_button)
 
+        self._ptt_key_button = QPushButton("Клавиша рации")
+        self._ptt_key_button.setToolTip("Назначить клавишу рации (push-to-talk)")
+        self._ptt_key_button.clicked.connect(self._on_ptt_key_button)
+
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 16, 0)
-        top_bar.setSpacing(0)
+        top_bar.setSpacing(6)
         top_bar.addWidget(self._status_widget, 1)
+        top_bar.addWidget(self._ptt_key_button)
         top_bar.addWidget(self._mode_button)
 
         self._chat_widget = ChatWidget(self._event_bus)
@@ -91,6 +101,7 @@ class MainWindow(QMainWindow):
         self._sig_state.connect(self._apply_state)
         self._sig_activity.connect(self._apply_activity)
         self._sig_mode.connect(self._apply_mode)
+        self._sig_ptt_key.connect(self._apply_ptt_key)
         self._event_bus.subscribe(EVENT_STATE_CHANGED, self._on_state_changed)
         self._event_bus.subscribe(EVENT_ACTIVITY_LOG, self._on_activity_log)
         self._event_bus.subscribe(
@@ -131,6 +142,23 @@ class MainWindow(QMainWindow):
 
     def set_activation_mode(self, mode: str) -> None:
         self._sig_mode.emit(mode)
+
+    def _on_ptt_key_button(self) -> None:
+        dialog = KeyCaptureDialog(parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dialog.reset_requested:
+            self._event_bus.publish(EVENT_PTT_KEY_RESET, {})
+        elif dialog.keysym:
+            self._event_bus.publish(
+                EVENT_PTT_KEY_SET, {"keysym": dialog.keysym, "label": dialog.label_text}
+            )
+
+    def _apply_ptt_key(self, label: str) -> None:
+        self._ptt_key_button.setText(f"Клавиша: {label}" if label else "Клавиша рации")
+
+    def set_ptt_key(self, label: str) -> None:
+        self._sig_ptt_key.emit(label)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # ADR-019: close hides the window, process stays alive

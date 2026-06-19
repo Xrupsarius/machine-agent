@@ -17,8 +17,10 @@ from app.core.state_manager import StateManager, AppState
 from app.core.service_registry import ServiceRegistry
 from app.ui.main_window import (
     MainWindow, EVENT_ACTIVATION_MODE_TOGGLE, EVENT_ACTIVATION_MODE_CHANGED,
+    EVENT_PTT_KEY_SET, EVENT_PTT_KEY_RESET,
 )
 from app.ui.activity_log_widget import EVENT_ACTIVITY_LOG
+from app.core.ptt_config import build_hypr_conf
 from app.ui.tray_icon import TrayIcon
 from app.ui.confirmation_dialog import ConfirmationDialog
 from app.stt.microphone_service import MicrophoneService
@@ -76,6 +78,7 @@ def _reset_to_idle_after(state_manager: StateManager, delay: float = 3.0) -> Non
 
 
 _SETTINGS_PATH = "data/settings.json"
+_DEFAULT_PTT_KEY = "F8"
 
 
 def _load_settings(path: str = _SETTINGS_PATH) -> dict:
@@ -137,6 +140,8 @@ def main() -> None:
         activation_mode = "wakeword"
     log.info(f"Activation mode: {activation_mode}")
 
+    ptt_key_label = _load_settings().get("ptt_key_label", _DEFAULT_PTT_KEY)
+
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     sigint_timer = QTimer()
     sigint_timer.timeout.connect(lambda: None)
@@ -149,6 +154,7 @@ def main() -> None:
     tray.show()
     window.show()
     window.set_activation_mode(activation_mode)
+    window.set_ptt_key(ptt_key_label)
     registry.register("window", window)
     registry.register("tray", tray)
 
@@ -545,6 +551,45 @@ def main() -> None:
 
         threading.Thread(target=_inject, daemon=True, name="PTTInject").start()
 
+    _ptt_conf_path = config.get("ptt_conf_path", "config/hyprland-ptt.conf")
+
+    def _apply_ptt_key(keysym: str, label: str) -> None:
+        try:
+            with open(_ptt_conf_path, "w", encoding="utf-8") as f:
+                f.write(build_hypr_conf(keysym, os.path.abspath(pid_path)))
+            _save_setting("ptt_key", keysym)
+            _save_setting("ptt_key_label", label)
+            reloaded = ""
+            try:
+                subprocess.run(
+                    ["hyprctl", "reload"], timeout=5,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                reloaded = " (Hyprland перезагружен)"
+            except Exception as e:
+                log.warning(f"hyprctl reload failed: {e}")
+                reloaded = " — выполните `hyprctl reload` вручную"
+            window.set_ptt_key(label)
+            _log(event_bus, f"🎚 Клавиша рации: {label}{reloaded}", "success")
+        except Exception as e:
+            log.error(f"_apply_ptt_key error: {e}", exc_info=True)
+            _log(event_bus, f"Не удалось назначить клавишу: {e}", "error")
+
+    def _on_ptt_key_set(data: dict) -> None:
+        keysym = data.get("keysym", "")
+        label = data.get("label", keysym)
+        if keysym:
+            threading.Thread(
+                target=_apply_ptt_key, args=(keysym, label),
+                daemon=True, name="PTTKeySet",
+            ).start()
+
+    def _on_ptt_key_reset(_) -> None:
+        threading.Thread(
+            target=_apply_ptt_key, args=(_DEFAULT_PTT_KEY, _DEFAULT_PTT_KEY),
+            daemon=True, name="PTTKeyReset",
+        ).start()
+
     def _on_activation_mode_toggle(_) -> None:
         new_mode = "ptt" if pipeline.activation_mode == "wakeword" else "wakeword"
         pipeline.set_activation_mode(new_mode)
@@ -569,6 +614,8 @@ def main() -> None:
     event_bus.subscribe(EVENT_DICTATION_TOGGLE, _on_dictation_toggle)
     event_bus.subscribe(EVENT_ACTIVATION_MODE_TOGGLE, _on_activation_mode_toggle)
     event_bus.subscribe(EVENT_PTT_TEXT, _on_ptt_text)
+    event_bus.subscribe(EVENT_PTT_KEY_SET, _on_ptt_key_set)
+    event_bus.subscribe(EVENT_PTT_KEY_RESET, _on_ptt_key_reset)
 
     def _on_app_quit() -> None:
         log.info("Shutting down gracefully...")
